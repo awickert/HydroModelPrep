@@ -41,9 +41,13 @@ grass.mapcalc('cellArea_km2 = '+str(reg['nsres'] * reg['ewres'])+' / 10.^6', ove
 
 # Create drainage direction, flow accumulation, and rivers
 # Creates sub-basins, river headwaters, and river segments, all with the same ID's
-grass.run_command('r.watershed', elev='srtm', flow='cellArea_km2', accumulation='flowAccum', drainage='drainageDirection', stream='streams', threshold=2, flags='s', overwrite=True)
-grass.run_command('r.stream.extract', elevation='srtm', threshold=100, accumulation='flowAccum', stream_raster='streams', stream_vector='streams', overwrite=True)
+grass.run_command('r.watershed', elev='srtm', flow='cellArea_km2', accumulation='flowAccum', drainage='drainageDirection', stream='streams', threshold=100, flags='s', overwrite=True)
 grass.run_command('r.stream.basins', direction='drainageDirection', stream_rast='streams', basins='basins', overwrite=True)
+# Now have to convert streams to vector, or so I think ... maybe it doesn't matter.
+# If so, omitting r.stream.extract solves basins problem!
+# But now have rivers with different cat flowing next to each other, and r.to.vect combines them (unfortunately.
+# This change of course breaks the "streams"-related functionalities below; will have to be fixed, including the combination of points and links in the streams network.
+# I should check the code I wrote for Kelly Monteleone's paper -- this has river identification and extraction, including intersection points.
 
 # Vectorize drainage basins
 grass.run_command('r.to.vect', input='basins', output='basins', type='area', flags='sv', overwrite=True)
