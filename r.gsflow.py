@@ -41,16 +41,28 @@ grass.mapcalc('cellArea_km2 = '+str(reg['nsres'] * reg['ewres'])+' / 10.^6', ove
 
 # Create drainage direction, flow accumulation, and rivers
 # Creates sub-basins, river headwaters, and river segments, all with the same ID's
-grass.run_command('r.watershed', elev='srtm', flow='cellArea_km2', accumulation='flowAccum', drainage='drainageDirection', stream='streams', threshold=100, flags='s', overwrite=True)
-grass.run_command('r.stream.basins', direction='drainageDirection', stream_rast='streams', basins='basins', overwrite=True)
-# Now have to convert streams to vector, or so I think ... maybe it doesn't matter.
-# If so, omitting r.stream.extract solves basins problem!
-# But now have rivers with different cat flowing next to each other, and r.to.vect combines them (unfortunately.
-# This change of course breaks the "streams"-related functionalities below; will have to be fixed, including the combination of points and links in the streams network.
-# I should check the code I wrote for Kelly Monteleone's paper -- this has river identification and extraction, including intersection points.
+grass.run_command('r.watershed', elev='srtm', flow='cellArea_km2', accumulation='flowAccum', drainage='drainageDirection', flags='s', overwrite=True)
+# Manually create streams from accumulation -- threshold should be provided by user.
+# The one funny step is the cleaning w/ snap, because r.thin allows cells that are
+# diagonal to each other to be next to each other -- creating boxes along the channel
+# that are not 
 
-# Vectorize drainage basins
-grass.run_command('r.to.vect', input='basins', output='basins', type='area', flags='sv', overwrite=True)
+grass.mapcalc('streams_unthinned = flowAccum > 100', overwrite=True)
+grass.run_command('r.null', map='streams_unthinned', setnull=0)
+grass.run_command('r.thin', input='streams_unthinned', output='streams', overwrite=True)
+grass.run_command('r.to.vect', input='streams', output='streams_raw', type='line', overwrite=True)
+grass.run_command('v.clean', input='streams_raw', output='streams', tool='snap', threshold=1.42*(grass.region()['nsres'] + grass.region()['ewres'])/2., flags='c', overwrite=True) # threshold is one cell
+grass.run_command('v.to.rast', input='streams', output='streams_unthinned', use='val', val=1, overwrite=True)
+grass.run_command('r.thin', input='streams_unthinned', output='streams', overwrite=True)
+grass.run_command('r.to.vect', input='streams', output='streams', type='line', overwrite=True)
+grass.run_command('v.to.rast', input='streams', output='streams', use='cat', overwrite=True)
+# Create drainage basins
+grass.run_command('r.stream.basins', direction='drainageDirection', stream_rast='streams', basins='basins', overwrite=True)
+# If there is any more need to work with nodes, I should check the code I wrote for Kelly Monteleone's paper -- this has river identification and extraction, including intersection points.
+
+
+# Vectorize drainage basins -- add 's' to smooth, if desired.
+grass.run_command('r.to.vect', input='basins', output='basins', type='area', flags='v', overwrite=True)
 
 # Then remove all sub-basins and segments that have negative flow accumulation
 # (i.e. have contributions from outside the map)
@@ -91,20 +103,16 @@ grass.run_command('g.rename', vect='basins,tmp', overwrite=True)
 grass.run_command('v.extract', input='tmp', output='basins', cats=goodcats_str)
 grass.run_command('g.rename', vect='streams,tmp', overwrite=True)
 grass.run_command('v.extract', input='tmp', output='streams', cats=goodcats_str)
+#grass.run_command('g.rename', vect='stream_nodes,tmp', overwrite=True)
+#grass.run_command('v.extract', input='tmp', output='stream_nodes', cats=goodcats_str)
 
-
-# Clean small areas -- pixellation
-# 20 might be a bit much!
-# ~~~~~~~~~~~~ !!!!!!!!! ~~~~~~~~~~~~
-# NEED A BETTER PERMANENT SOLUTION HERE -- ONE THAT VECTORIZES THROUGH
-# ANGLED 1-PIEXEL-WIDE PIECES
-# ~~~~~~~~~~~~ !!!!!!!!! ~~~~~~~~~~~~
+# Fix pixellated pieces -- formerly here due to one-pixel-basin issue
 reg = grass.region()
 grass.run_command('g.rename', vect='basins,basins_messy', overwrite=True)
 grass.run_command('v.clean', input='basins_messy', output='basins', tool='rmarea', threshold=reg['nsres']*reg['ewres'], overwrite=True)
 
-
-# Optional -- choose a subset of the region in which to do the PRMS calculation
+# Optional, but recommended becuase not all basins need connect:
+# choose a subset of the region in which to do the PRMS calculation
 grass.run_command( 'r.water.outlet', input='drainageDirection', output='studyBasin', coordinates=str(basin_mouth_E)+','+str(basin_mouth_N) , overwrite=True)
 # Vectorize
 grass.run_command( 'r.to.vect', input='studyBasin', output='studyBasin', type='area', overwrite=True)
@@ -113,8 +121,7 @@ grass.run_command( 'r.to.vect', input='studyBasin', output='studyBasin', type='a
 # a watershed in contiguous units
 
 #"""
-# ONLY IF MORE THAN ONE STUDY BASIN -- REMOVE DANLGE!
-# BUT MAYBE TAKEN CARE OF BY A SIMPLER V.CLEAN?
+# ONLY IF MORE THAN ONE STUDY BASIN -- remove small areas
 grass.run_command( 'v.db.addcolumn', map='studyBasin', columns='area_m2 double precision' )
 grass.run_command( 'v.db.dropcolumn', map='studyBasin', columns='label' )
 grass.run_command( 'v.to.db', map='studyBasin', columns='area_m2', option='area', units='meters')
@@ -128,11 +135,16 @@ catsOnly = drainageAreasOnly[:,0].astype(int)
 drainageAreasOnly = drainageAreasOnly[:,1]
 row_with_max_drainage_area = (drainageAreasOnly == np.max(drainageAreasOnly)).nonzero()[0][0]
 cat_with_max_drainage_area = catsOnly[row_with_max_drainage_area]
-grass.run_command('g.rename', vect='studyBasin,tmp')
+grass.run_command('g.rename', vect='studyBasin,tmp', overwrite=True)
 grass.run_command('v.extract', input='tmp', output='studyBasin', cats=cat_with_max_drainage_area, overwrite=True)
 grass.run_command('g.remove', type='vector', name='tmp', flags='f')
 grass.run_command('v.to.rast', input='studyBasin', output='studyBasin', use='val', value=1, overwrite=True)
 #"""
+"""
+# Remove small areas -- easier, though not as sure, as the method above
+grass.run_command('v.rename', vect='studyBasin,tmp', overwrite=True)
+grass.run_command('v.clean', input='tmp', output='studyBasin', tool='rmarea', threshold=1.01*(grass.region()['nsres'] * grass.region()['ewres']), flags='c', overwrite=True) # threshold is one cell
+"""
 
 
 ###############
@@ -143,7 +155,9 @@ grass.run_command('v.to.rast', input='studyBasin', output='studyBasin', use='val
 
 # Next, get the order of basins the old-fashioned way: coordinates of endpoints of lines
 # Because I can't use GRASS to query multiple points
-grass.run_command('v.extract', input='streams', output='streamSegments', type='line', overwrite=True)
+#grass.run_command('v.extract', input='streams', output='streamSegments', type='line', overwrite=True)
+# Maybe I don't even need nodes! 9/4/16 -- nope, doesn't seem so.
+grass.run_command('g.copy', rast='streams,streamSegments')
 grass.run_command('v.db.addcolumn', map='streamSegments', columns='z double precision, flow_accum double precision, x1 double precision, y1 double precision, x2 double precision, y2 double precision')
 grass.run_command('v.to.db', map='streamSegments', option='start', columns='x1, y1')
 grass.run_command('v.to.db', map='streamSegments', option='end', columns='x2, y2')
@@ -600,8 +614,9 @@ cur.executemany("update HRU set hru_segment=? where id=?", hru_segmentt)
 hru.table.conn.commit()
 hru.close()
 
-v.db.select segment sep=comma > segment.csv
-v.db.select HRU sep=comma > HRU.csv
+# More old-fashioned way:
+os.system('v.db.select segment sep=comma > segment.csv')
+os.system('v.db.select HRU sep=comma > HRU.csv')
 # and then sort by id, manually
 # And then manually change the last segment's "tosegment" to 0.
 # Except in this case, it was 0!
@@ -610,218 +625,19 @@ v.db.select HRU sep=comma > HRU.csv
 # but hoping I did something right by re-doing all of the above before
 # saving (and doing so inside this smaller basin)
 
-print "COMPLETE."
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""
-# Extract only that region that is within the study area
-grass.run_command('g.rename', vect='HRU,HRU_all')
-grass.run_command('g.rename', vect='segment,segment_all')
-#grass.run_command('v.extract', input=
-
-# Extract only that region that is within the study area
-grass.run_command('g.rename', vect='HRU,HRU_all_2')
-grass.run_command('g.rename', vect='segment,segment_all_2')
-# 
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# query number of topological features
-areas   = zipcodes.number_of("areas")
-islands = zipcodes.number_of("islands")
-print 'Map: <' + vectmap + '> with %d areas and %d islands' % (areas, islands)
- 
-
-# http://www.ing.unitn.it/~zambelli/projects/pygrass/attributes.html
-
-  
-# This is maybe not true -- but intention is to send the HRU's flow to its
-# enclosed river segment for river segment ID === HRU ID. But need consecutive
-# numbers [1, 2, ..., n]
-# hru_segment = tosegment.copy()
-
-                                            
-# Parameters for cascading-flow simulation
-# Not doing cascade yet, but preparing for it!
-#hru_columns.append('cascade_flg integer') # Cascade type: 0: many to many; 1: one to one
-#hru_columns.append('cascade_tol double precision') # Cascade area below which cascade links are ignored
-#hru_columns.append('circle_switch integer') # Switch to check for circles (0, don't = efficient; 1, do = safe, good at first!)
-
-#hru_columns.append('gw_down_id integer') # START HERE!!!!!!!!!!
-#hru_columns.append('cascade_flg double precision') # 
-#hru_columns.append('cascade_flg double precision') # 
-#hru_columns.append('cascade_flg double precision') # 
-#hru_columns.append('cascade_flg double precision') # 
-#hru_columns.append('cascade_flg integer') # 
-
-# hru_up_id --> ncascade
-# hru_down_id --> ncascade
-# hru_strmseg_down_id --> ncascade
-#hru_columns.append('ncascade integer') # CHECK WITH CRYSTAL WHAT THIS SHOULD BE -- THINK IT IS THE SURFACE-WATER ONE
-#hru_columns.append('ncascade_gw integer') # CHECK WITH CRYSTAL WHAT THIS SHOULD BE -- THINK IT IS GW_DOWN_ID OR SOMETHING LIKE THIS
-
-
-
-"""
-# NOT SURE IF THIS IS NECESSARY ANYMORE!
-
-# First, get accumulation at points -- see which is upstream and which is downstream.
-# And get elevation while we're at it
-xystr = []
-for x, y in xy:
-  #print x, y
-  xystr.append(str(x)+','+str(y))
-
-# Really inefficient, but first step is just to make it work...
-z = []
-accum = []  
-for xyi in xystr:
-  z.append(float(grass.parse_command('r.what', map='srtm,flowAccum', coordinates=xyi).keys()[0].split('|')[-2]))
-  accum.append(float(grass.parse_command('r.what', map='srtm,flowAccum', coordinates=xyi).keys()[0].split('|')[-1]))
-z = np.array(z)
-accum_raw = np.array(accum)
-accum = np.abs(accum) # This will include some negative values of basin mouths that enter rivers with offmap inputs
-                      # Making positive because everything 
-
-# break big lists into those corresponding to x1,y1; x2, y2
-L = len(xy1)
-accum1 = accum[:L]
-accum2 = accum[L:]
-z1 = z[:L]
-z2 = z[L:]
-
-# And likewise turn small lists into big ones
-cat2 = np.vstack((cat, cat))
-
-streamSegments = 
-"""
-
-
-# No longer needed
-#incomplete_basin_cats = list(set(list(cat2[accum <= 0].squeeze())))
-
-"""
-from contextlib import redirect_stdout
-# check: http://eli.thegreenplace.net/2015/redirecting-all-kinds-of-stdout-in-python/
-xystr = ''
-for x, y in xy:
-  #print x, y
-  xystr += str(x)+' '+str(y)+'\n'
-grass.write_command('r.what', map='srtm,flowAccum', output='-', stdin=xystr)
-"""
-
-
-nsegs_at_point = []
-for row in xy:
-  nsegs_at_point.append(np.sum( np.prod(xy == row, axis=1)))
-nsegs_at_point = np.array(nsegs_at_point)
-
-# Then, see which upstream ones are the upstream-most (i.e., no flow entering)
-
-# Then, go to the ends of these and see what they flow into.
-
-# Fill an array of the numbers of the in_vectors and out_vectors
-
-
-
-# Each row in xy1 corresponds to each row in xy2, so these are the endpoints of this stream segment
-
-
-# CHECK FOR REPEATS -- SHOULD CREATE A LIST OF MINIMUM POINTS
-nsegs_at_point = []
-for row in xy1:
-  nsegs_at_point.append(np.sum( np.prod(xy1 == row, axis=1) + np.prod(xy2 == row, axis=1) ))
-for row in xy2:
-  nsegs_at_point.append(np.sum((xy1 == row) + (xy2 == row))/2  - 1)
-nsegs_at_point = np.array(nsegs_at_point)
-(nsegs_at_point == 5).nonzero()
-
-all_points = np.vstack((xy1, xy2))
-all_unique_points
-
-# Have to query using coordinates, later
-#grass.run_command('v.what.rast', map=
-
-"""
-# Get the order of basins
-grass.run_command('v.extract', input='streams', output='streamHeads', type='point')
-grass.run_command('v.db.addcolumn', map='streamHeads', columns='streamSegmentsHere integer')
-grass.run_command('v.what.vect', map='streamHeads', column='streamSegmentsHere', query_map='streams', query_column='cat', dmax=60)
-
-grass.run_command('v.extract', input='streams', output='streamSegments', type='line')
-"""
-
-# CASCADE: SKIP THIS IF YOU WANT TO GO DIRECTLY TO BASIN OUTLET (AND IF YOU USE SUBBASINS)
-
-
-
-
-
-
+print ""
+print "PRMS PORTION COMPLETE."
+print ""
 
 
 
 ###########
 # MODFLOW #
 ###########
+
+print ""
+print "STARTING MODFLOW PORTION."
+print ""
 
 # Generate coarse box for MODFLOW (ADW, 4 September, 2016)
 
@@ -835,5 +651,10 @@ grass.run_command('r.colors', map='allHRUs', color='grey', flags='n')
 grass.run_command('g.region', res=MODFLOWres)
 grass.run_command('r.resamp.stats', method='average', input='allHRUs', output='fraction_of_HRU_in_MODFLOW_cell', overwrite=True)
 grass.run_command('r.colors', map='fraction_of_HRU_in_MODFLOW_cell', color='grey', flags='n')
+
+
+print ""
+print "MODFLOW PORTION COMPLETE."
+print ""
 
 
