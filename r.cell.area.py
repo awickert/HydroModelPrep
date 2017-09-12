@@ -71,15 +71,15 @@ def main():
 
     # Then compute
     if projinfo['units'] == 'meters':
-        if units == 'm2'
+        if units == 'm2':
             grass.mapcalc(output+' = nsres() * ewres() / 10.^6')
-        elif units == 'km2'
+        elif units == 'km2':
             grass.mapcalc(output+' = nsres() * ewres() / 10.^6')
     elif projinfo['units'] == 'degrees':
-        if units == 'm2'
+        if units == 'm2':
             grass.mapcalc(output+' = ( 111195. * nsres() ) * \
                           ( ewres() * (3.14159/180.) * 6371000. * cos(y()) )')
-        elif units == 'km2'
+        elif units == 'km2':
             grass.mapcalc(output+' = ( 111.195 * nsres() ) * \
                           ( ewres() * (3.14159/180.) * 6371. * cos(y()) )')
     else:
