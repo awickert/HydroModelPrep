@@ -72,7 +72,7 @@ def main():
     # Then compute
     if projinfo['units'] == 'meters':
         if units == 'm2':
-            grass.mapcalc(output+' = nsres() * ewres() / 10.^6')
+            grass.mapcalc(output+' = nsres() * ewres()')
         elif units == 'km2':
             grass.mapcalc(output+' = nsres() * ewres() / 10.^6')
     elif projinfo['units'] == 'degrees':
@@ -85,4 +85,6 @@ def main():
     else:
         print 'Units: ', + projinfo['units'] + ' not currently supported'
     
-    
+if __name__ == "__main__":
+    main()
+
